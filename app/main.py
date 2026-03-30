@@ -3,6 +3,12 @@
 import sys
 from pathlib import Path
 
+# Ensure project root is in sys.path so 'app' package is discoverable
+# when the script is run directly (python app/main.py)
+_PROJECT_ROOT = Path(__file__).parent.parent
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
+
 from PySide6.QtWidgets import QApplication
 
 from app.core.config import Config

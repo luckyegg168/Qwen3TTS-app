@@ -61,6 +61,12 @@ class MainWindow(QtWidgets.QMainWindow):
     def _connect_signals(self):
         self.edit_tab.text_sent.connect(self._on_text_sent_to_tts)
         self.edit_tab.text_sent_to_clone.connect(self._on_text_sent_to_clone)
+        # Refresh history tab whenever it becomes active
+        self.tabs.currentChanged.connect(self._on_tab_changed)
+
+    def _on_tab_changed(self, index: int):
+        if self.tabs.widget(index) is self.history_tab:
+            self.history_tab.refresh()
 
     def _on_text_sent_to_tts(self, text: str):
         self.text_tab.text_input.setPlainText(text)
