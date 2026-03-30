@@ -1,0 +1,19 @@
+api:
+  qwen3_base_url: "http://localhost:8000"
+  qwen3_timeout: 60
+  verify_ssl: true
+
+ollama:
+  base_url: "http://localhost:11434"
+  default_model: "llama3.2:latest"
+
+audio:
+  sample_rate: 22050
+  format: "wav"
+
+ui:
+  theme: "light"
+  window_size: [1200, 800]
+
+history:
+  max_entries: 100
