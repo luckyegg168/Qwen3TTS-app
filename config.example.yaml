@@ -7,6 +7,13 @@ ollama:
   base_url: "http://localhost:11434"
   default_model: "llama3.2:latest"
 
+# Unified LLM provider for 潤稿/翻譯 — provider: ollama | openai | fastapi
+llm:
+  provider: "ollama"
+  base_url: "http://localhost:11434"
+  api_key: ""
+  model: "llama3.2:latest"
+
 audio:
   sample_rate: 22050
   format: "wav"
@@ -23,3 +30,7 @@ asr:
   model_id: "Qwen/Qwen3-ASR-0.6B"
   device: "cpu"
   timestamps: true
+  # mode: local (venv-asr subprocess) or api (OpenAI-compatible endpoint)
+  mode: "local"
+  api_url: ""
+  api_key: ""

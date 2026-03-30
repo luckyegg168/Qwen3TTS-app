@@ -47,16 +47,29 @@ class SettingsTab(QWidget):
 
         layout.addWidget(qwen3_group)
 
-        ollama_group = QGroupBox("Ollama API 設定")
-        ollama_layout = QFormLayout(ollama_group)
+        # ── LLM (潤稿/翻譯) 設定 ───────────────────────────────────────────────
+        llm_group = QGroupBox("LLM 潤稿翻譯 設定")
+        llm_layout = QFormLayout(llm_group)
 
-        self.ollama_url_input = QLineEdit(self.config.ollama.base_url)
-        ollama_layout.addRow("API URL：", self.ollama_url_input)
+        self.llm_provider_combo = QComboBox()
+        self.llm_provider_combo.addItems(["ollama", "openai", "fastapi"])
+        idx = self.llm_provider_combo.findText(self.config.llm.provider)
+        if idx >= 0:
+            self.llm_provider_combo.setCurrentIndex(idx)
+        llm_layout.addRow("模式：", self.llm_provider_combo)
 
-        self.model_input = QLineEdit(self.config.ollama.default_model)
-        ollama_layout.addRow("預設模型：", self.model_input)
+        self.llm_url_input = QLineEdit(self.config.llm.base_url)
+        llm_layout.addRow("Base URL：", self.llm_url_input)
 
-        layout.addWidget(ollama_group)
+        self.llm_api_key_input = QLineEdit(self.config.llm.api_key)
+        self.llm_api_key_input.setPlaceholderText("可留空（Ollama）")
+        self.llm_api_key_input.setEchoMode(QLineEdit.Password)
+        llm_layout.addRow("API Key：", self.llm_api_key_input)
+
+        self.llm_model_input = QLineEdit(self.config.llm.model)
+        llm_layout.addRow("模型：", self.llm_model_input)
+
+        layout.addWidget(llm_group)
 
         audio_group = QGroupBox("音訊設定")
         audio_layout = QFormLayout(audio_group)
@@ -95,11 +108,11 @@ class SettingsTab(QWidget):
         make_secondary_button(self.test_qwen3_btn)
         button_layout.addWidget(self.test_qwen3_btn)
 
-        self.test_ollama_btn = QPushButton("🔌  測試 Ollama 連線")
-        self.test_ollama_btn.clicked.connect(self._on_test_ollama)
-        self.test_ollama_btn.setToolTip("測試 Ollama 連線狀態並列出可用模型")
-        make_secondary_button(self.test_ollama_btn)
-        button_layout.addWidget(self.test_ollama_btn)
+        self.test_llm_btn = QPushButton("🔌  測試 LLM 連線")
+        self.test_llm_btn.clicked.connect(self._on_test_llm)
+        self.test_llm_btn.setToolTip("測試 LLM 連線狀態並列出可用模型")
+        make_secondary_button(self.test_llm_btn)
+        button_layout.addWidget(self.test_llm_btn)
 
         layout.addLayout(button_layout)
 
@@ -128,32 +141,37 @@ class SettingsTab(QWidget):
                 self, "連線失敗", "無法連接到 API 服務，請確認 URL 是否正確"
             )
 
-    def _on_test_ollama(self):
-        from ..api.ollama_client import OllamaClient
+    def _on_test_llm(self):
+        from ..api.llm_client import LLMClient
 
-        url = self.ollama_url_input.text().strip()
+        url = self.llm_url_input.text().strip()
         if not url:
-            QMessageBox.warning(self, "警告", "請輸入 Ollama URL")
+            QMessageBox.warning(self, "警告", "請輸入 LLM Base URL")
             return
 
-        client = OllamaClient(url)
+        provider = self.llm_provider_combo.currentText()
+        api_key  = self.llm_api_key_input.text().strip()
+        model    = self.llm_model_input.text().strip()
+        client = LLMClient(provider=provider, base_url=url, api_key=api_key, model=model)
         if client.health_check():
             models = client.list_models()
-            model_info = f"Ollama 服務正常運行！\n\n可用模型：\n" + "\n".join(
+            info = f"LLM 服務正常運行！\n提供商：{provider}\n\n可用模型：\n" + "\n".join(
                 f"  • {m}" for m in models[:10]
             )
             if len(models) > 10:
-                model_info += f"\n  ... 及其他 {len(models) - 10} 個模型"
-            QMessageBox.information(self, "成功", model_info)
+                info += f"\n  ... 及其他 {len(models) - 10} 個模型"
+            QMessageBox.information(self, "成功", info)
         else:
-            QMessageBox.warning(self, "連線失敗", "無法連接到 Ollama 服務")
+            QMessageBox.warning(self, "連線失敗", f"無法連接到 LLM 服務（{provider} @ {url}）")
 
     def _on_save(self):
         self.config.api.qwen3_base_url = self.url_input.text().strip()
         self.config.api.qwen3_timeout = self.timeout_spin.value()
         self.config.api.verify_ssl = self.verify_ssl_cb.isChecked()
-        self.config.ollama.base_url = self.ollama_url_input.text().strip()
-        self.config.ollama.default_model = self.model_input.text().strip()
+        self.config.llm.provider  = self.llm_provider_combo.currentText()
+        self.config.llm.base_url  = self.llm_url_input.text().strip()
+        self.config.llm.api_key   = self.llm_api_key_input.text().strip()
+        self.config.llm.model     = self.llm_model_input.text().strip()
         self.config.ui.window_size = (
             self.width_spin.value(),
             self.height_spin.value(),

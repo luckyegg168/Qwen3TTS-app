@@ -21,6 +21,18 @@ class OllamaConfig:
 
 
 @dataclass
+class LLMConfig:
+    """Unified LLM provider config for 潤稿 / translate functions.
+
+    provider:  ``"ollama"`` | ``"openai"`` | ``"fastapi"``
+    """
+    provider: str = "ollama"
+    base_url: str = "http://localhost:11434"
+    api_key: str = ""
+    model: str = "llama3.2:latest"
+
+
+@dataclass
 class AudioConfig:
     sample_rate: int = 22050
     format: str = "wav"
@@ -43,12 +55,17 @@ class ASRConfig:
     model_id: str = "Qwen/Qwen3-ASR-0.6B"
     device: str = "cpu"
     timestamps: bool = True
+    # API mode (remote OpenAI-compatible ASR endpoint)
+    mode: str = "local"   # "local" | "api"
+    api_url: str = ""
+    api_key: str = ""
 
 
 @dataclass
 class Config:
     api: APIConfig = field(default_factory=APIConfig)
     ollama: OllamaConfig = field(default_factory=OllamaConfig)
+    llm: LLMConfig = field(default_factory=LLMConfig)
     audio: AudioConfig = field(default_factory=AudioConfig)
     ui: UIConfig = field(default_factory=UIConfig)
     history: HistoryConfig = field(default_factory=HistoryConfig)
@@ -64,6 +81,7 @@ class Config:
     def _from_dict(cls, data: dict[str, Any]) -> "Config":
         api_data     = data.get("api", {})
         ollama_data  = data.get("ollama", {})
+        llm_data     = data.get("llm", {})
         audio_data   = data.get("audio", {})
         ui_data      = data.get("ui", {})
         history_data = data.get("history", {})
@@ -79,6 +97,12 @@ class Config:
                 base_url=ollama_data.get("base_url", "http://localhost:11434"),
                 default_model=ollama_data.get("default_model", "llama3.2:latest"),
             ),
+            llm=LLMConfig(
+                provider=llm_data.get("provider", "ollama"),
+                base_url=llm_data.get("base_url", "http://localhost:11434"),
+                api_key=llm_data.get("api_key", ""),
+                model=llm_data.get("model", "llama3.2:latest"),
+            ),
             audio=AudioConfig(**audio_data),
             ui=UIConfig(
                 theme=ui_data.get("theme", "light"),
@@ -90,6 +114,9 @@ class Config:
                 model_id=asr_data.get("model_id", "Qwen/Qwen3-ASR-0.6B"),
                 device=asr_data.get("device", "cpu"),
                 timestamps=asr_data.get("timestamps", True),
+                mode=asr_data.get("mode", "local"),
+                api_url=asr_data.get("api_url", ""),
+                api_key=asr_data.get("api_key", ""),
             ),
         )
 
@@ -103,6 +130,12 @@ class Config:
             "ollama": {
                 "base_url": self.ollama.base_url,
                 "default_model": self.ollama.default_model,
+            },
+            "llm": {
+                "provider": self.llm.provider,
+                "base_url": self.llm.base_url,
+                "api_key": self.llm.api_key,
+                "model": self.llm.model,
             },
             "audio": {
                 "sample_rate": self.audio.sample_rate,
@@ -120,6 +153,9 @@ class Config:
                 "model_id": self.asr.model_id,
                 "device": self.asr.device,
                 "timestamps": self.asr.timestamps,
+                "mode": self.asr.mode,
+                "api_url": self.asr.api_url,
+                "api_key": self.asr.api_key,
             },
         }
         with open(path, "w", encoding="utf-8") as f:

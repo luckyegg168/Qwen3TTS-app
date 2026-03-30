@@ -14,6 +14,7 @@ from PySide6.QtWidgets import QApplication
 from app.core.config import Config
 from app.api.qwen3_client import Qwen3Client
 from app.api.ollama_client import OllamaClient
+from app.api.llm_client import LLMClient
 from app.api.asr_client import ASRClient
 from app.core.history import HistoryManager
 from app.ui.main_window import MainWindow
@@ -44,9 +45,19 @@ def main():
     )
     ollama_client.default_model = config.ollama.default_model
 
+    llm_client = LLMClient(
+        provider=config.llm.provider,
+        base_url=config.llm.base_url,
+        api_key=config.llm.api_key,
+        model=config.llm.model,
+    )
+
     asr_client = ASRClient(
         venv_asr_dir=Path(__file__).parent.parent / config.asr.venv_asr_path,
         device=config.asr.device,
+        mode=config.asr.mode,
+        api_url=config.asr.api_url,
+        api_key=config.asr.api_key,
     )
 
     data_dir = Path(__file__).parent.parent / "data"
@@ -61,7 +72,7 @@ def main():
     window = MainWindow(
         config=config,
         qwen3_client=qwen3_client,
-        ollama_client=ollama_client,
+        llm_client=llm_client,
         history_manager=history_manager,
         asr_client=asr_client,
     )

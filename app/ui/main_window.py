@@ -66,11 +66,11 @@ class _StatusDot(QWidget):
 
 
 class MainWindow(QtWidgets.QMainWindow):
-    def __init__(self, config, qwen3_client, ollama_client, history_manager, asr_client=None):
+    def __init__(self, config, qwen3_client, llm_client, history_manager, asr_client=None):
         super().__init__()
         self.config = config
         self.qwen3_client = qwen3_client
-        self.ollama_client = ollama_client
+        self.llm_client = llm_client
         self.history_manager = history_manager
         self.asr_client = asr_client
 
@@ -98,7 +98,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.text_tab = TextTab(self.qwen3_client, self.history_manager)
         self.clone_tab = CloneTab(self.qwen3_client, self.history_manager)
         self.edit_tab = EditTab(
-            self.ollama_client, self.qwen3_client, self.history_manager
+            self.llm_client, self.qwen3_client, self.history_manager
         )
         self.asr_tab = ASRTab(self.asr_client)
         self.history_tab = HistoryTab(
@@ -135,7 +135,7 @@ class MainWindow(QtWidgets.QMainWindow):
         sep2.setStyleSheet("background: transparent;")
         self.status_bar.addPermanentWidget(sep2)
 
-        self.ollama_dot = _StatusDot("Ollama")
+        self.ollama_dot = _StatusDot("LLM")
         self.status_bar.addPermanentWidget(self.ollama_dot)
 
     def _connect_signals(self):
@@ -179,7 +179,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         for name, fn in [
             ("qwen3", self.qwen3_client.health_check),
-            ("ollama", self.ollama_client.health_check),
+            ("ollama", self.llm_client.health_check),
         ]:
             thread = QtCore.QThread(self)
             probe = _Probe(name, fn)

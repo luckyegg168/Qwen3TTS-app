@@ -210,7 +210,11 @@ class ASRTab(QWidget):
 
     def _build_options_group(self) -> QGroupBox:
         grp = QGroupBox("辨識選項")
-        row = QHBoxLayout(grp)
+        vbox = QVBoxLayout(grp)
+        vbox.setSpacing(10)
+
+        # --- Row 1: Language / Model / Timestamps ---
+        row = QHBoxLayout()
         row.setSpacing(20)
 
         # Language
@@ -249,6 +253,39 @@ class ASRTab(QWidget):
         row.addLayout(ts_col)
 
         row.addStretch()
+        vbox.addLayout(row)
+
+        # --- Row 2: Engine mode (Local venv-asr / Remote API) ---
+        engine_row = QHBoxLayout()
+        engine_row.setSpacing(12)
+        engine_row.addWidget(QLabel("引擎："))
+        self._engine_grp = QButtonGroup(self)
+        self.rb_engine_local = QRadioButton("本地 venv-asr")
+        self.rb_engine_api   = QRadioButton("遠端 API")
+        self.rb_engine_local.setChecked(True)
+        for rb in (self.rb_engine_local, self.rb_engine_api):
+            self._engine_grp.addButton(rb)
+            engine_row.addWidget(rb)
+        engine_row.addStretch()
+        vbox.addLayout(engine_row)
+
+        # --- Row 3: API URL + Key (hidden unless API mode) ---
+        self.api_fields_row = QWidget()
+        api_row_layout = QHBoxLayout(self.api_fields_row)
+        api_row_layout.setContentsMargins(0, 0, 0, 0)
+        api_row_layout.setSpacing(8)
+        api_row_layout.addWidget(QLabel("API URL："))
+        self.asr_api_url_edit = QLineEdit()
+        self.asr_api_url_edit.setPlaceholderText("例： http://localhost:8000")
+        api_row_layout.addWidget(self.asr_api_url_edit, stretch=3)
+        api_row_layout.addWidget(QLabel("API Key："))
+        self.asr_api_key_edit = QLineEdit()
+        self.asr_api_key_edit.setPlaceholderText("可留空")
+        self.asr_api_key_edit.setEchoMode(QLineEdit.Password)
+        api_row_layout.addWidget(self.asr_api_key_edit, stretch=2)
+        self.api_fields_row.setVisible(False)
+        vbox.addWidget(self.api_fields_row)
+
         return grp
 
     # ── Action bar + progress ─────────────────────────────────────────────────
@@ -367,6 +404,8 @@ class ASRTab(QWidget):
         self.export_txt_btn.clicked.connect(lambda: self._on_export("txt"))
         self.export_srt_btn.clicked.connect(lambda: self._on_export("srt"))
         self.export_vtt_btn.clicked.connect(lambda: self._on_export("vtt"))
+        self.rb_engine_local.toggled.connect(self._on_engine_toggled)
+        self.rb_engine_api.toggled.connect(self._on_engine_toggled)
 
     # ── Slots ─────────────────────────────────────────────────────────────────
 
@@ -380,6 +419,13 @@ class ASRTab(QWidget):
         )
         if path:
             self.file_path_edit.setText(path)
+
+    def _on_engine_toggled(self) -> None:
+        api_mode = self.rb_engine_api.isChecked()
+        self.api_fields_row.setVisible(api_mode)
+        # Update client mode immediately so banner reflects reality
+        self.asr_client.mode = "api" if api_mode else "local"
+        self._refresh_availability()
 
     def _on_start(self) -> None:
         # Validate source
@@ -402,15 +448,26 @@ class ASRTab(QWidget):
                 QMessageBox.warning(self, "網址格式錯誤", "請輸入有效的 http:// 或 https:// 網址。")
                 return
 
-        if not self.asr_client.is_available():
-            QMessageBox.critical(
-                self, "venv-asr 未就緒",
-                "ASR 環境（venv-asr）尚未安裝。\n\n"
-                "請在專案根目錄執行：\n"
-                "  Windows：setup_asr.bat\n"
-                "  Linux/Mac：bash setup_asr.sh",
-            )
-            return
+        # Apply current engine settings to client
+        if self.rb_engine_api.isChecked():
+            api_url = self.asr_api_url_edit.text().strip()
+            if not api_url:
+                QMessageBox.warning(self, "缺少 API URL", "請輸入遠端 ASR API 的 URL。")
+                return
+            self.asr_client.mode    = "api"
+            self.asr_client.api_url = api_url.rstrip("/")
+            self.asr_client.api_key = self.asr_api_key_edit.text().strip()
+        else:
+            self.asr_client.mode = "local"
+            if not self.asr_client.is_available():
+                QMessageBox.critical(
+                    self, "venv-asr 未就緒",
+                    "ASR 環境（venv-asr）尚未安裝。\n\n"
+                    "請在專案根目錄執行：\n"
+                    "  Windows：setup_asr.bat\n"
+                    "  Linux/Mac：bash setup_asr.sh",
+                )
+                return
 
         model_id = self.model_combo.currentData()
         language = self.lang_combo.currentData()
@@ -555,6 +612,23 @@ class ASRTab(QWidget):
             btn.setEnabled(False)
 
     def _refresh_availability(self) -> None:
+        if self.asr_client.mode == "api":
+            api_url = self.asr_api_url_edit.text().strip() if hasattr(self, "asr_api_url_edit") else ""
+            if api_url:
+                self.env_banner.setText(f"● 遠端 ASR API 模式  ({api_url})")
+                self.env_banner.setStyleSheet(
+                    f"font-size: {FONT_SIZE_SM}px; border-radius: 4px; padding: 2px 8px;"
+                    f"background: #1a2e4d; color: {COLOR_SUCCESS};"
+                )
+            else:
+                self.env_banner.setText("⚠ 遠端 API 模式 — 請輸入 API URL")
+                self.env_banner.setStyleSheet(
+                    f"font-size: {FONT_SIZE_SM}px; border-radius: 4px; padding: 2px 8px;"
+                    f"background: #3d3010; color: {COLOR_WARNING};"
+                )
+            self.start_btn.setEnabled(True)
+            return
+
         avail = self.asr_client.is_available()
         if avail:
             self.env_banner.setText("● venv-asr 已就緒")

@@ -1,0 +1,28 @@
+# Qwen3-TTS Server dependencies
+# Install into venv-tts via setup-tts.bat / setup-tts.sh
+
+# ── TTS model ──────────────────────────────────────────────────────────────
+qwen-tts>=0.1.0
+
+# ── Web server ─────────────────────────────────────────────────────────────
+fastapi>=0.110.0
+uvicorn[standard]>=0.29.0
+python-multipart>=0.0.9
+
+# ── Audio I/O ──────────────────────────────────────────────────────────────
+soundfile>=0.12.0
+numpy>=1.24.0
+
+# ── PyTorch (CPU by default; replace with CUDA wheel if you have a GPU) ────
+# CPU-only:
+#   torch>=2.0.0
+#   torchaudio>=2.0.0
+# CUDA 12.x (uncomment and remove CPU lines):
+#   --index-url https://download.pytorch.org/whl/cu121
+#   torch>=2.0.0
+#   torchaudio>=2.0.0
+torch>=2.0.0
+torchaudio>=2.0.0
+
+# ── Misc ───────────────────────────────────────────────────────────────────
+pydantic>=2.0.0

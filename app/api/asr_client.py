@@ -28,9 +28,12 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
+
+import requests
 
 
 # ─── Data classes ─────────────────────────────────────────────────────────────
@@ -134,7 +137,8 @@ _WORKER_SCRIPT = (
 
 
 class ASRClient:
-    """Manages Qwen3-ASR via an isolated ``venv-asr`` subprocess.
+    """Manages Qwen3-ASR via an isolated ``venv-asr`` subprocess **or** a
+    remote OpenAI-compatible ASR API endpoint.
 
     Parameters
     ----------
@@ -142,17 +146,31 @@ class ASRClient:
         Path to the ``venv-asr`` directory.  Defaults to ``<project_root>/venv-asr``.
     device:
         Torch device string – ``"cpu"``, ``"cuda"``, or ``"cuda:0"``.
+    mode:
+        ``"local"`` (default) – run ASR inside venv-asr subprocess.
+        ``"api"``             – call a remote OpenAI-compatible ASR endpoint.
+    api_url:
+        Base URL for API mode, e.g. ``"http://localhost:8001"``.
+        The client will POST to ``{api_url}/v1/audio/transcriptions``.
+    api_key:
+        Bearer token for API mode (leave empty if not required).
     """
 
     def __init__(
         self,
         venv_asr_dir: Path | str | None = None,
         device: str = "cpu",
+        mode: str = "local",
+        api_url: str = "",
+        api_key: str = "",
     ) -> None:
         if venv_asr_dir is None:
             venv_asr_dir = Path(__file__).resolve().parent.parent.parent / "venv-asr"
         self.venv_asr_dir = Path(venv_asr_dir)
         self.device = device
+        self.mode = mode          # "local" | "api"
+        self.api_url = api_url.rstrip("/")
+        self.api_key = api_key
 
     # ── Properties ──────────────────────────────────────────────────────
 
@@ -168,7 +186,19 @@ class ASRClient:
         return self.python_exe.exists() and _WORKER_SCRIPT.exists()
 
     def health_check(self) -> bool:
-        """Lightweight check – identical to :meth:`is_available`."""
+        """Return True when the configured backend is ready/reachable."""
+        if self.mode == "api":
+            if not self.api_url:
+                return False
+            try:
+                resp = requests.get(
+                    f"{self.api_url}/health",
+                    headers={"Authorization": f"Bearer {self.api_key}"} if self.api_key else {},
+                    timeout=5,
+                )
+                return resp.status_code == 200
+            except Exception:
+                return False
         return self.is_available()
 
     # ── Main entrypoint ─────────────────────────────────────────────────
@@ -183,7 +213,10 @@ class ASRClient:
         timeout: int = 900,
         progress_callback: Callable[[str], None] | None = None,
     ) -> ASRResult:
-        """Run Qwen3-ASR transcription in a subprocess under venv-asr.
+        """Run Qwen3-ASR transcription via local subprocess or remote API.
+
+        Dispatches to :meth:`_transcribe_local` or :meth:`_transcribe_via_api`
+        depending on ``self.mode``.
 
         Parameters
         ----------
@@ -192,16 +225,134 @@ class ASRClient:
         model_id:     HuggingFace model repo, e.g. ``"Qwen/Qwen3-ASR-1.7B"``.
         language:     ``"auto"`` to auto-detect, or any supported language name.
         timestamps:   Whether to request word-level timestamps (ForcedAligner).
-        timeout:      Max seconds to wait for the subprocess (default 900 = 15 min).
+        timeout:      Max seconds to wait (default 900 = 15 min).
         progress_callback:
             Called with a human-readable Chinese progress label whenever a
-            ``PROGRESS:`` line arrives on stderr.  Runs in the **calling** thread.
+            ``PROGRESS:`` line arrives.  Runs in the **calling** thread.
+        """
+        if self.mode == "api":
+            return self._transcribe_via_api(
+                source=source,
+                source_type=source_type,
+                model_id=model_id,
+                language=language,
+                timeout=timeout,
+                progress_callback=progress_callback,
+            )
+        return self._transcribe_local(
+            source=source,
+            source_type=source_type,
+            model_id=model_id,
+            language=language,
+            timestamps=timestamps,
+            timeout=timeout,
+            progress_callback=progress_callback,
+        )
 
-        Returns
-        -------
-        ASRResult
-            Contains ``.text`` (full transcript), ``.language``, and
-            ``.segments`` (list of :class:`ASRSegment`).
+    # ── API mode ─────────────────────────────────────────────────────────
+
+    def _transcribe_via_api(
+        self,
+        source: str,
+        source_type: str,
+        model_id: str,
+        language: str,
+        timeout: int,
+        progress_callback: Callable[[str], None] | None,
+    ) -> ASRResult:
+        """POST to ``{api_url}/v1/audio/transcriptions`` (OpenAI-compatible)."""
+        if not self.api_url:
+            raise RuntimeError("ASR API URL 未設定，請在設定頁面填寫 API URL。")
+
+        if progress_callback:
+            progress_callback("準備中…")
+
+        endpoint = f"{self.api_url}/v1/audio/transcriptions"
+        headers: dict[str, str] = {}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+
+        # For URL sources, download to a temp file first
+        if source_type == "url":
+            if progress_callback:
+                progress_callback("下載中… 0%")
+            try:
+                dl_resp = requests.get(source, stream=True, timeout=120, headers=headers)
+                dl_resp.raise_for_status()
+                suffix = ".webm"
+                with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+                    for chunk in dl_resp.iter_content(chunk_size=65536):
+                        tmp.write(chunk)
+                    tmp_path = tmp.name
+            except Exception as exc:
+                raise RuntimeError(f"下載失敗：{exc}") from exc
+            audio_path = tmp_path
+            cleanup = True
+        else:
+            audio_path = source
+            cleanup = False
+
+        if progress_callback:
+            progress_callback("辨識中…")
+
+        try:
+            lang_param = "" if language == "auto" else language
+            with open(audio_path, "rb") as f:
+                files = {"file": (Path(audio_path).name, f, "audio/mpeg")}
+                data: dict = {
+                    "model": model_id,
+                    "response_format": "verbose_json",
+                }
+                if lang_param:
+                    data["language"] = lang_param
+                resp = requests.post(
+                    endpoint,
+                    headers=headers,
+                    files=files,
+                    data=data,
+                    timeout=timeout,
+                )
+                resp.raise_for_status()
+                result_json: dict = resp.json()
+        except requests.RequestException as exc:
+            raise RuntimeError(f"ASR API 請求失敗：{exc}") from exc
+        finally:
+            if cleanup:
+                try:
+                    Path(audio_path).unlink(missing_ok=True)
+                except Exception:
+                    pass
+
+        text = result_json.get("text", "").strip()
+        detected_lang = result_json.get("language", language)
+        raw_segments = result_json.get("segments", [])
+        segments = [
+            ASRSegment(
+                text=seg.get("text", "").strip(),
+                start=float(seg.get("start", 0.0)),
+                end=float(seg.get("end", 0.0)),
+            )
+            for seg in raw_segments
+        ]
+
+        if progress_callback:
+            progress_callback("完成")
+
+        return ASRResult(text=text, language=detected_lang, segments=segments)
+
+    # ── Local subprocess mode ─────────────────────────────────────────────
+
+    def _transcribe_local(
+        self,
+        source: str,
+        source_type: str,
+        model_id: str,
+        language: str,
+        timestamps: bool,
+        timeout: int,
+        progress_callback: Callable[[str], None] | None,
+    ) -> ASRResult:
+        """Run Qwen3-ASR transcription in a subprocess under venv-asr (legacy).
 
         Raises
         ------

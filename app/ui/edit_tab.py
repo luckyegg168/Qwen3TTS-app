@@ -1,4 +1,4 @@
-"""Edit & Translate tab with Ollama integration"""
+"""Edit & Translate tab with multi-provider LLM integration"""
 
 from PySide6 import QtWidgets, QtCore
 from PySide6.QtWidgets import (
@@ -17,21 +17,21 @@ from PySide6.QtWidgets import (
     QScrollArea,
 )
 
-from ..api.ollama_client import OllamaClient
+from ..api.llm_client import LLMClient
 from ..core.chinese_converter import ChineseConverter
 from ..core.history import HistoryEntry
 from datetime import datetime
 
 
 class _EditWorker(QtCore.QObject):
-    """Background worker for Ollama text processing."""
+    """Background worker for LLM text processing."""
 
     finished = QtCore.Signal(str)
     error = QtCore.Signal(str)
 
-    def __init__(self, ollama_client, text, mode, instruction=""):
+    def __init__(self, llm_client, text, mode, instruction=""):
         super().__init__()
-        self._client = ollama_client
+        self._client = llm_client
         self._text = text
         self._mode = mode
         self._instruction = instruction
@@ -56,9 +56,9 @@ class _EditWorker(QtCore.QObject):
 
 
 class EditTab(QWidget):
-    def __init__(self, ollama_client, qwen3_client, history_manager):
+    def __init__(self, llm_client, qwen3_client, history_manager):
         super().__init__()
-        self.ollama_client = ollama_client
+        self.llm_client = llm_client
         self.qwen3_client = qwen3_client
         self.history_manager = history_manager
         self._thread: QtCore.QThread | None = None
@@ -172,12 +172,12 @@ class EditTab(QWidget):
         model_group = QGroupBox("模型資訊")
         model_layout = QVBoxLayout(model_group)
 
-        self.model_label = QLabel(f"模型：{self.ollama_client.default_model}")
+        self.model_label = QLabel(f"模型：{self.llm_client.default_model}")
         model_layout.addWidget(self.model_label)
 
-        self.test_ollama_btn = QPushButton("測試 Ollama 連線")
-        self.test_ollama_btn.clicked.connect(self._on_test_ollama)
-        model_layout.addWidget(self.test_ollama_btn)
+        self.test_llm_btn = QPushButton("測試 LLM 連線")
+        self.test_llm_btn.clicked.connect(self._on_test_llm)
+        model_layout.addWidget(self.test_llm_btn)
 
         right_layout.addWidget(model_group)
         right_layout.addStretch()
@@ -232,7 +232,7 @@ class EditTab(QWidget):
         self.progress_bar.setVisible(True)
 
         self._thread = QtCore.QThread()
-        self._worker = _EditWorker(self.ollama_client, text, mode, instruction)
+        self._worker = _EditWorker(self.llm_client, text, mode, instruction)
         self._worker.moveToThread(self._thread)
         self._thread.started.connect(self._worker.run)
         self._worker.finished.connect(self._on_process_done)
@@ -286,11 +286,11 @@ class EditTab(QWidget):
         self.input_text.clear()
         self.output_text.clear()
 
-    def _on_test_ollama(self):
-        if self.ollama_client.health_check():
-            QMessageBox.information(self, "成功", "Ollama 服務正常運行！")
+    def _on_test_llm(self):
+        if self.llm_client.health_check():
+            QMessageBox.information(self, "成功", "LLM 服務正常運行！")
         else:
-            QMessageBox.warning(self, "連線失敗", "無法連接到 Ollama 服務")
+            QMessageBox.warning(self, "連線失敗", "無法連接到 LLM 服務")
 
     def _on_send_to_tts(self):
         text = self.output_text.toPlainText().strip()
