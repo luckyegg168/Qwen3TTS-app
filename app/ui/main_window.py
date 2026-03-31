@@ -104,7 +104,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.history_tab = HistoryTab(
             self.history_manager, self.text_tab, self.clone_tab
         )
-        self.settings_tab = SettingsTab(self.config)
+        self.settings_tab = SettingsTab(self.config, asr_client=self.asr_client)
 
         for tab_obj, (icon_label, _) in zip(
             [self.text_tab, self.clone_tab, self.edit_tab,

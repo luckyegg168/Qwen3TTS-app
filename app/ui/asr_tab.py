@@ -130,6 +130,7 @@ class ASRTab(QWidget):
         self._worker: _ASRWorker | None = None
 
         self._setup_ui()
+        self._load_from_client()
         self._connect_signals()
         self._refresh_availability()
 
@@ -392,6 +393,18 @@ class ASRTab(QWidget):
 
         vbox.addLayout(export_row)
         return grp
+
+    # ── Init from client ─────────────────────────────────────────────────────
+
+    def _load_from_client(self) -> None:
+        """Populate engine mode, API URL, and API key from the asr_client state."""
+        if self.asr_client.mode == "api":
+            self.rb_engine_api.setChecked(True)
+            self.api_fields_row.setVisible(True)
+        if self.asr_client.api_url:
+            self.asr_api_url_edit.setText(self.asr_client.api_url)
+        if self.asr_client.api_key:
+            self.asr_api_key_edit.setText(self.asr_client.api_key)
 
     # ── Signals ───────────────────────────────────────────────────────────────
 

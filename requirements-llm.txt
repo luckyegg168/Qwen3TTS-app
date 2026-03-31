@@ -1,0 +1,20 @@
+# Dependencies for venv-llm (local LLM 潤稿翻譯 server)
+# Install with: pip install -r requirements-llm.txt
+
+# ── LLM inference ──────────────────────────────────────────────────────────
+transformers>=4.40.0
+accelerate>=0.27.0
+
+# ── Web server ─────────────────────────────────────────────────────────────
+fastapi>=0.110.0
+uvicorn[standard]>=0.29.0
+pydantic>=2.0.0
+
+# ── PyTorch（CPU；GPU 請取消下方 CUDA 註解）──────────────────────────────
+torch>=2.0.0
+# --index-url https://download.pytorch.org/whl/cu121
+# torch>=2.0.0
+
+# ── Tokenizer helpers ──────────────────────────────────────────────────────
+sentencepiece>=0.1.99
+protobuf>=3.20.0

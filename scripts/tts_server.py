@@ -25,7 +25,22 @@ import base64
 import io
 import logging
 import sys
+from pathlib import Path
 from typing import Optional
+
+# ─── Local model resolution ───────────────────────────────────────────────────
+
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+_MODELS_DIR   = _PROJECT_ROOT / "models"
+
+
+def _resolve(repo_id: str) -> str:
+    """Return local models/ path if the model was downloaded there, else repo_id."""
+    name = repo_id.split("/")[-1]
+    local = _MODELS_DIR / name
+    if (local / "config.json").exists():
+        return str(local)
+    return repo_id
 
 import numpy as np
 import soundfile as sf
@@ -59,10 +74,11 @@ def _load_model(model_id: str, device: str) -> None:
     _model_id = model_id
     _device = device
 
-    log.info("Loading model %s on %s …", model_id, device)
+    resolved = _resolve(model_id)
+    log.info("Loading model %s on %s …", resolved, device)
     try:
         from qwen_tts import Qwen3TTS  # type: ignore[import]
-        _model = Qwen3TTS(model_id=model_id, device=device)
+        _model = Qwen3TTS(model_id=resolved, device=device)
     except ImportError as exc:
         log.error(
             "Cannot import qwen_tts. "
@@ -141,7 +157,7 @@ app = FastAPI(title="Qwen3-TTS Server", version="1.0.0")
 
 @app.get("/health")
 def health() -> dict:
-    return {"status": "ok", "model": _model_id, "device": _device}
+    return {"status": "ok", "model": _model_id, "model_path": _resolve(_model_id), "device": _device}
 
 
 @app.post("/tts")

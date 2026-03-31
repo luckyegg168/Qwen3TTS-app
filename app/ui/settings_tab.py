@@ -21,9 +21,10 @@ from .theme import make_secondary_button
 
 
 class SettingsTab(QWidget):
-    def __init__(self, config: Config):
+    def __init__(self, config: Config, asr_client=None):
         super().__init__()
         self.config = config
+        self._asr_client = asr_client
         self._setup_ui()
 
     def _setup_ui(self):
@@ -71,6 +72,27 @@ class SettingsTab(QWidget):
 
         layout.addWidget(llm_group)
 
+        # ── ASR 設定 ───────────────────────────────────────────────────────────
+        asr_group = QGroupBox("Qwen3 ASR 設定")
+        asr_layout = QFormLayout(asr_group)
+
+        self.asr_mode_combo = QComboBox()
+        self.asr_mode_combo.addItems(["local（本地 venv-asr）", "api（遠端 API）"])
+        self.asr_mode_combo.setCurrentIndex(1 if self.config.asr.mode == "api" else 0)
+        self.asr_mode_combo.currentIndexChanged.connect(self._on_asr_mode_changed)
+        asr_layout.addRow("模式：", self.asr_mode_combo)
+
+        self.asr_api_url_input = QLineEdit(self.config.asr.api_url)
+        self.asr_api_url_input.setPlaceholderText("例：http://192.168.1.100:8002")
+        asr_layout.addRow("API URL：", self.asr_api_url_input)
+
+        self.asr_api_key_input = QLineEdit(self.config.asr.api_key)
+        self.asr_api_key_input.setPlaceholderText("可留空")
+        self.asr_api_key_input.setEchoMode(QLineEdit.Password)
+        asr_layout.addRow("API Key：", self.asr_api_key_input)
+
+        layout.addWidget(asr_group)
+
         audio_group = QGroupBox("音訊設定")
         audio_layout = QFormLayout(audio_group)
 
@@ -114,6 +136,12 @@ class SettingsTab(QWidget):
         make_secondary_button(self.test_llm_btn)
         button_layout.addWidget(self.test_llm_btn)
 
+        self.test_asr_btn = QPushButton("🔌  測試 ASR API")
+        self.test_asr_btn.clicked.connect(self._on_test_asr)
+        self.test_asr_btn.setToolTip("測試遠端 ASR API 連線狀態")
+        make_secondary_button(self.test_asr_btn)
+        button_layout.addWidget(self.test_asr_btn)
+
         layout.addLayout(button_layout)
 
         save_layout = QHBoxLayout()
@@ -124,6 +152,14 @@ class SettingsTab(QWidget):
         save_layout.addWidget(self.save_btn)
 
         layout.addLayout(save_layout)
+
+        self._on_asr_mode_changed()  # Apply initial visibility for ASR fields
+
+    def _on_asr_mode_changed(self):
+        api_mode = self.asr_mode_combo.currentIndex() == 1
+        self.asr_api_url_input.setEnabled(api_mode)
+        self.asr_api_key_input.setEnabled(api_mode)
+        self.test_asr_btn.setEnabled(api_mode)
 
     def _on_test_qwen3(self):
         from ..api.qwen3_client import Qwen3Client
@@ -140,6 +176,23 @@ class SettingsTab(QWidget):
             QMessageBox.warning(
                 self, "連線失敗", "無法連接到 API 服務，請確認 URL 是否正確"
             )
+
+    def _on_test_asr(self):
+        url = self.asr_api_url_input.text().strip()
+        if not url:
+            QMessageBox.warning(self, "警告", "請輸入 ASR API URL")
+            return
+        import requests as _req
+        api_key = self.asr_api_key_input.text().strip()
+        headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+        try:
+            resp = _req.get(f"{url.rstrip('/')}/health", headers=headers, timeout=5)
+            if resp.status_code == 200:
+                QMessageBox.information(self, "成功", f"ASR API 服務正常！\n{url}")
+            else:
+                QMessageBox.warning(self, "連線失敗", f"回應狀態碼：{resp.status_code}")
+        except Exception as exc:
+            QMessageBox.warning(self, "連線失敗", f"無法連接到 ASR API：{exc}")
 
     def _on_test_llm(self):
         from ..api.llm_client import LLMClient
@@ -172,6 +225,15 @@ class SettingsTab(QWidget):
         self.config.llm.base_url  = self.llm_url_input.text().strip()
         self.config.llm.api_key   = self.llm_api_key_input.text().strip()
         self.config.llm.model     = self.llm_model_input.text().strip()
+        asr_mode = "api" if self.asr_mode_combo.currentIndex() == 1 else "local"
+        self.config.asr.mode    = asr_mode
+        self.config.asr.api_url = self.asr_api_url_input.text().strip()
+        self.config.asr.api_key = self.asr_api_key_input.text().strip()
+        # Sync live asr_client if available
+        if self._asr_client is not None:
+            self._asr_client.mode    = asr_mode
+            self._asr_client.api_url = self.config.asr.api_url
+            self._asr_client.api_key = self.config.asr.api_key
         self.config.ui.window_size = (
             self.width_spin.value(),
             self.height_spin.value(),

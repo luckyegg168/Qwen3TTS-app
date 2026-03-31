@@ -4,12 +4,15 @@
 
 **專案名稱：** Qwen3-TTS Desktop  
 **專案類型：** 桌面應用程式（PySide6）  
-**核心功能：** 
-- 文字轉語音合成
+**核心功能：**
+- 文字轉語音合成（Qwen3-TTS）
 - 語音克隆（文字參考 + 音檔參考）
-- 潤稿翻譯（本地 Ollama 模型）
-- 簡繁轉換
+- 潤稿翻譯（多 LLM 提供商）
+- 語音辨識（Qwen3-ASR，本地或遠端 API）
 - 歷史記錄管理
+- 集中式設定管理
+
+**單一實例約束：** 應用程式透過 `QSharedMemory` 確保同時只有一個實例執行。
 
 ---
 
@@ -18,64 +21,78 @@
 ### 2.1 系統架構圖
 
 ```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                            GUI Layer (PySide6)                           │
-│  ┌─────────────────────────────────────────────────────────────────────┐ │
-│  │                         QTabWidget                                  │ │
-│  │  ┌───────────┐ ┌───────────┐ ┌───────────┐ ┌───────────────┐      │ │
-│  │  │ 文字合成分頁 │ │ 語音克隆分頁 │ │ 潤稿翻譯分頁 │ │   設定分頁    │      │ │
-│  │  │  TextTab  │ │  CloneTab │ │ EditTab   │ │ SettingsTab  │      │ │
-│  │  └───────────┘ └───────────┘ └───────────┘ └───────────────┘      │ │
-│  └─────────────────────────────────────────────────────────────────────┘ │
-└─────────────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│                           Service Layer                                 │
-│  ┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐          │
-│  │  AudioPlayer    │ │  AudioExporter  │ │ HistoryManager  │          │
-│  │  (QtMultimedia) │ │   (soundfile)  │ │    (YAML)      │          │
-│  └─────────────────┘ └─────────────────┘ └─────────────────┘          │
-│  ┌─────────────────┐ ┌─────────────────┐                               │
-│  │ OllamaClient    │ │ ChineseConverter│                               │
-│  │  (requests)    │ │   (opencc)     │                               │
-│  └─────────────────┘ └─────────────────┘                               │
-└─────────────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│                           Backend Services                              │
-│  ┌───────────────────────┐     ┌───────────────────────┐               │
-│  │   Qwen3-TTS API       │     │    Ollama API         │               │
-│  │  (文字合成/語音克隆)     │     │  (潤稿/翻譯模型)       │               │
-│  │ localhost:8000         │     │ localhost:11434        │               │
-│  └───────────────────────┘     └───────────────────────┘               │
-└─────────────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                              GUI Layer (PySide6)                              │
+│  ┌──────────────────────────────────────────────────────────────────────────┐ │
+│  │                           QTabWidget (6 tabs)                            │ │
+│  │  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌────┐ ┌───────┐  │ │
+│  │  │ 文字合成  │ │ 語音克隆  │ │ 潤稿翻譯  │ │ 語音辨識  │ │歷史│ │ 設定  │  │ │
+│  │  │ TextTab  │ │CloneTab  │ │ EditTab  │ │ ASRTab   │ │    │ │       │  │ │
+│  │  └──────────┘ └──────────┘ └──────────┘ └──────────┘ └────┘ └───────┘  │ │
+│  └──────────────────────────────────────────────────────────────────────────┘ │
+└──────────────────────────────────────────────────────────────────────────────┘
+                                       │
+                                       ▼
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                               Service Layer                                  │
+│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐              │
+│  │  AudioPlayer    │  │  AudioExporter  │  │ HistoryManager  │              │
+│  │  (QtMultimedia) │  │   (soundfile)   │  │    (YAML)       │              │
+│  └─────────────────┘  └─────────────────┘  └─────────────────┘              │
+│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐              │
+│  │  Qwen3Client    │  │   LLMClient     │  │   ASRClient     │              │
+│  │  (requests)     │  │  (requests)     │  │  (requests /    │              │
+│  └─────────────────┘  └─────────────────┘  │   subprocess)   │              │
+│  ┌─────────────────┐                        └─────────────────┘              │
+│  │ChineseConverter │                                                          │
+│  │   (opencc)      │                                                          │
+│  └─────────────────┘                                                          │
+└──────────────────────────────────────────────────────────────────────────────┘
+                                       │
+                                       ▼
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                              Backend Services                                │
+│  ┌──────────────────────┐  ┌──────────────────────┐  ┌────────────────────┐ │
+│  │   Qwen3-TTS API      │  │     LLM API          │  │  Qwen3-ASR         │ │
+│  │ (文字合成/語音克隆)    │  │ (潤稿/翻譯)          │  │  ─ 本地 venv-asr   │ │
+│  │ localhost:8000        │  │ Ollama/OpenAI/FastAPI│  │  ─ 遠端 API        │ │
+│  │ (scripts/tts_server) │  │ localhost:11434 等   │  │    (OpenAI-compat) │ │
+│  └──────────────────────┘  └──────────────────────┘  └────────────────────┘ │
+└──────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ### 2.2 模組依賴關係
 
 ```
-main.py
+main.py  (QSharedMemory 單一實例鎖)
     └── MainWindow
             ├── TextTab
+            │       ├── Qwen3Client
             │       ├── AudioPlayer
             │       ├── AudioExporter
-            │       ├── Qwen3Client
             │       └── HistoryManager
             ├── CloneTab
+            │       ├── Qwen3Client
             │       ├── AudioPlayer
             │       ├── AudioExporter
+            │       └── HistoryManager
+            ├── EditTab
+            │       ├── LLMClient (Ollama / OpenAI / FastAPI)
+            │       ├── ChineseConverter
             │       ├── Qwen3Client
             │       └── HistoryManager
-            ├── EditTab (NEW)
-            │       ├── OllamaClient (NEW)
-            │       ├── ChineseConverter (NEW)
-            │       ├── Qwen3Client
+            ├── ASRTab
+            │       └── ASRClient
+            │               ├── [local] venv-asr subprocess
+            │               │          └── scripts/asr_worker.py
+            │               └── [api]   遠端 OpenAI-compatible 端點
+            ├── HistoryTab
             │       └── HistoryManager
             └── SettingsTab
                     ├── Config
-                    └── OllamaConfig (NEW)
+                    ├── ASRClient  (同步 mode/api_url/api_key)
+                    ├── Qwen3Client (測試連線)
+                    └── LLMClient   (測試連線)
 ```
 
 ---
@@ -90,8 +107,8 @@ main.py
 | 語速調整 | 0.5x ~ 2.0x，預設 1.0x |
 | 音調調整 | 0.5x ~ 2.0x，預設 1.0x |
 | 音量調整 | 0.0 ~ 1.0，預設 1.0 |
-| 播放控制 | 播放/暫停/停止 |
-| 音訊匯出 | 支援 WAV 格式 |
+| 播放控制 | 播放 / 暫停 / 停止 |
+| 音訊匯出 | WAV 格式 |
 | 快速潤稿 | 一鍵將輸入文字送往潤稿翻譯分頁 |
 
 ### 3.2 語音克隆（Voice Clone）
@@ -99,146 +116,289 @@ main.py
 | 功能 | 說明 |
 |------|------|
 | 模式一：文字參考 | 輸入參考文字，使用相同音色朗讀目標文字 |
-| 模式二：音檔參考 | 上傳參考音檔（.wav/.mp3），克隆該音色 |
+| 模式二：音檔參考 | 上傳參考音檔（.wav / .mp3），克隆該音色 |
 | 語速調整 | 0.5x ~ 2.0x，預設 1.0x |
 | 音量調整 | 0.0 ~ 1.0，預設 1.0 |
-| 播放控制 | 播放/暫停/停止 |
-| 音訊匯出 | 支援 WAV 格式 |
+| 播放控制 | 播放 / 暫停 / 停止 |
+| 音訊匯出 | WAV 格式 |
 
-### 3.3 潤稿翻譯（Edit & Translate）★★★ NEW
+### 3.3 潤稿翻譯（Edit & Translate）
 
 | 功能 | 說明 |
 |------|------|
 | 原文輸入 | 多行文字輸入框 |
-| 潤稿處理 | 使用 Ollama 模型優化文字（修正語法、順暢語句） |
-| 翻譯處理 | 使用 Ollama 模型翻譯（支援多語言） |
-| 語言方向 | 原文語言 → 目標語言 |
-| 快速轉換 | 潤稿/翻譯結果一鍵送往文字合成 |
-| 簡繁轉換 | 潤稿/翻譯結果可切换簡體/繁體 ★★ NEW |
+| 七種處理模式 | 見下表 |
+| 快速轉換 | 結果一鍵送往文字合成或語音克隆 |
+| LLM 多提供商 | Ollama / OpenAI-compatible / FastAPI |
 
-**支援的處理模式：**
-- 潤稿（保持原語言）
-- 中文簡→繁
-- 中文繁→簡
-- 英→中翻譯
-- 中→英翻譯
-- 日→中翻譯
-- 自訂指令（Prompt）
+**處理模式：**
 
-### 3.4 簡繁轉換（Chinese Converter）★★★ NEW
+| 模式 | 說明 | 後端 |
+|------|------|------|
+| 潤稿 | 優化語句流暢度 | LLMClient |
+| 中文簡→繁 | 簡體轉繁體 | ChineseConverter (opencc) |
+| 中文繁→簡 | 繁體轉簡體 | ChineseConverter (opencc) |
+| 英→中翻譯 | English → 中文 | LLMClient |
+| 中→英翻譯 | 中文 → English | LLMClient |
+| 日→中翻譯 | 日文 → 中文 | LLMClient |
+| 自訂指令 | 使用者自訂 Prompt | LLMClient |
+
+### 3.4 語音辨識（ASR）
 
 | 功能 | 說明 |
 |------|------|
-| 簡→繁 | 簡體中文轉繁體中文 |
-| 繁→簡 | 繁體中文轉簡體中文 |
-| 批量轉換 | 支援大段文字 |
-| 詞彙對照 | 支援地區用詞差異（台/港/陸） |
+| 來源：本地檔案 | 音訊 / 影片檔案（wav, mp3, mp4 等） |
+| 來源：線上 URL | YouTube / Bilibili 等 |
+| 引擎：本地 | 透過 venv-asr 執行 Qwen3-ASR |
+| 引擎：遠端 API | OpenAI-compatible `/v1/audio/transcriptions` |
+| 語言 | 自動偵測或指定（30+ 語言） |
+| 模型選擇 | Qwen3-ASR-0.6B / Qwen3-ASR-1.7B |
+| 時間戳記 | 詞語級別時間軸（ForcedAligner） |
+| 匯出格式 | TXT / SRT / VTT |
+| 進度顯示 | 即時顯示下載 / 載入 / 辨識進度 |
 
-### 3.5 歷史記錄（History）★★★ NEW
+### 3.5 歷史記錄（History）
 
 | 功能 | 說明 |
 |------|------|
 | 瀏覽記錄 | 清單檢視所有歷史項目 |
-| 操作類型 | 區分 TTS/Clone/Edit 類型 |
-| 詳情檢視 | 檢視歷史項目的完整內容 |
-| 重新執行 | 從歷史記錄快速重複操作 |
-| 刪除記錄 | 支援刪除單筆或清空全部 |
-| 匯出文字 | 將歷史文字內容複製到剪貼簿 |
+| 操作類型 | TTS / Clone / Edit |
+| 詳情檢視 | 完整內容 |
+| 重新執行 | 快速重複操作 |
+| 刪除 | 單筆或清空全部 |
+| 複製文字 | 複製到剪貼簿 |
+
+### 3.6 設定（Settings）
+
+| 群組 | 欄位 | 說明 |
+|------|------|------|
+| Qwen3-TTS API | API URL | TTS 伺服器位址（預設 `localhost:8000`） |
+| | 超時時間 | 10–300 秒 |
+| | SSL 驗證 | 是否驗證 SSL 憑證 |
+| LLM 潤稿翻譯 | 模式 | `ollama` / `openai` / `fastapi` |
+| | Base URL | LLM 伺服器位址 |
+| | API Key | Bearer Token（Ollama 可留空） |
+| | 模型 | 模型 ID |
+| Qwen3 ASR | 模式 | `local（本地 venv-asr）` / `api（遠端 API）` |
+| | API URL | 遠端 ASR 端點（API 模式） |
+| | API Key | Bearer Token（可留空） |
+| 音訊 | 取樣率 / 格式 | 唯讀顯示 |
+| UI | 視窗大小 | 寬 × 高 |
+
+**測試按鈕：** 測試 Qwen3 連線 / 測試 LLM 連線 / 測試 ASR API  
+**儲存：** 寫入 `config.yaml`，同步更新 live `asr_client` 狀態
 
 ---
 
 ## 4. API 介面規格
 
-### 4.1 Qwen3-TTS API
+### 4.1 Qwen3-TTS Server（`scripts/tts_server.py`，port 8000）
 
-#### 文字合成
+| 方法 | 路徑 | 說明 |
+|------|------|------|
+| GET | `/health` | 健康檢查 → `{"status":"ok","model":"...","device":"..."}` |
+| POST | `/tts` | 文字合成 → Binary audio |
+| POST | `/clone/text` | 語音克隆（文字參考）→ Binary audio |
+| POST | `/clone/audio` | 語音克隆（音檔參考，base64）→ Binary audio |
+
 ```
 POST /tts
-{
-  "text": "要合成的文字",
-  "speed": 1.0,
-  "pitch": 1.0,
-  "volume": 1.0,
-  "format": "wav"
-}
-→ Binary audio (audio/wav)
-```
+{ "text": "...", "speed": 1.0, "pitch": 1.0, "volume": 1.0, "format": "wav", "speaker": null }
 
-#### 語音克隆（文字參考）
-```
 POST /clone/text
-{
-  "text": "要合成的文字",
-  "ref_text": "參考文字",
-  ...
-}
-→ Binary audio (audio/wav)
-```
+{ "text": "...", "ref_text": "...", "speed": 1.0, ... }
 
-#### 語音克隆（音檔參考）
-```
 POST /clone/audio
-{
-  "text": "要合成的文字",
-  "ref_audio": "<base64>",
-  ...
-}
-→ Binary audio (audio/wav)
+{ "text": "...", "ref_audio": "<base64>", "speed": 1.0, ... }
 ```
 
-### 4.2 Ollama API
+### 4.2 LLM API
 
-#### 文字生成
+> 本地模式可選擇：
+> - **Ollama**（需另外安裝 Ollama）
+> - **本地 LLM 伺服器**（`scripts/llm_server.py`，使用 `models/` 下的 Qwen3 模型，設定 `provider: fastapi`）
+> - **外部 OpenAI-compatible API**
+
+**Ollama 模式：**
 ```
-POST /api/generate
+POST {base_url}/api/generate
+{ "model": "llama3.2:latest", "prompt": "...", "stream": false }
+→ { "response": "..." }
+
+GET {base_url}/api/tags  (健康檢查 / 列出模型)
+```
+
+**OpenAI / FastAPI 模式：**
+```
+POST {base_url}/v1/chat/completions
+Authorization: Bearer {api_key}
+{ "model": "...", "messages": [...], "stream": false }
+→ { "choices": [{ "message": { "content": "..." } }] }
+
+GET {base_url}/v1/models  (健康檢查 / 列出模型)
+```
+
+### 4.3 Qwen3-ASR API（遠端 API 模式）
+
+```
+POST {api_url}/v1/audio/transcriptions
+Authorization: Bearer {api_key}  (可選)
+Content-Type: multipart/form-data
+  file:            <audio bytes>
+  model:           "Qwen/Qwen3-ASR-0.6B"
+  response_format: "verbose_json"
+  language:        "Chinese"  (可選，留空為自動偵測)
+
+→ {
+    "text": "完整辨識文字",
+    "language": "Chinese",
+    "segments": [{ "text": "...", "start": 0.0, "end": 2.5 }, ...]
+  }
+```
+
+### 4.4 ASR 本地 Subprocess 協定
+
+**stdin（JSON）：**
+```json
 {
-  "model": "llama3.2:latest",
-  "prompt": "prompt text",
-  "stream": false
+  "type":       "file" | "url",
+  "source":     "/path/to/audio" | "https://...",
+  "model_id":   "Qwen/Qwen3-ASR-0.6B",
+  "language":   "auto" | "Chinese" | "English" | ...,
+  "timestamps": true,
+  "device":     "cpu" | "cuda"
 }
-→ {"response": "..."}
+```
+
+**stdout（JSON）：**
+```json
+{
+  "status":   "ok" | "error",
+  "text":     "辨識結果",
+  "language": "Chinese",
+  "segments": [{ "text": "...", "start": 0.0, "end": 2.5 }],
+  "error":    null
+}
+```
+
+**stderr：** `PROGRESS:<stage>` 進度標籤
+
+---
+
+## 5. 設定檔（`config.yaml`）
+
+```yaml
+api:
+  qwen3_base_url: "http://localhost:8000"
+  qwen3_timeout: 60
+  verify_ssl: true
+
+ollama:
+  base_url: "http://localhost:11434"
+  default_model: "llama3.2:latest"
+
+llm:
+  provider: "ollama"          # "ollama" | "openai" | "fastapi"
+  base_url: "http://localhost:11434"
+  api_key: ""
+  model: "llama3.2:latest"
+
+audio:
+  sample_rate: 22050
+  format: "wav"
+
+ui:
+  theme: "light"
+  window_size: [960, 640]
+
+history:
+  max_entries: 100
+
+asr:
+  venv_asr_path: "venv-asr"
+  model_id: "Qwen/Qwen3-ASR-0.6B"
+  device: "cpu"
+  timestamps: true
+  mode: "local"               # "local" | "api"
+  api_url: ""
+  api_key: ""
 ```
 
 ---
 
-## 5. 專案結構（更新）
+## 6. 專案結構
 
 ```
 Qwen3TTS-app/
 ├── app/
 │   ├── __init__.py
-│   ├── main.py
+│   ├── main.py                  # 入口點，QSharedMemory 單一實例鎖
 │   ├── ui/
 │   │   ├── __init__.py
-│   │   ├── main_window.py
-│   │   ├── text_tab.py
-│   │   ├── clone_tab.py
-│   │   ├── edit_tab.py          ★ NEW
-│   │   ├── history_tab.py        ★ NEW
-│   │   └── settings_tab.py
+│   │   ├── main_window.py       # 主視窗，6 分頁，狀態列連線指示燈
+│   │   ├── text_tab.py          # 文字合成分頁
+│   │   ├── clone_tab.py         # 語音克隆分頁
+│   │   ├── edit_tab.py          # 潤稿翻譯分頁
+│   │   ├── asr_tab.py           # 語音辨識分頁
+│   │   ├── history_tab.py       # 歷史記錄分頁
+│   │   ├── settings_tab.py      # 設定分頁（TTS / LLM / ASR / UI）
+│   │   └── theme.py             # 深色主題 tokens
 │   ├── api/
 │   │   ├── __init__.py
-│   │   ├── qwen3_client.py
-│   │   ├── ollama_client.py      ★ NEW
-│   │   └── exceptions.py
+│   │   ├── qwen3_client.py      # Qwen3-TTS HTTP 客戶端
+│   │   ├── ollama_client.py     # Ollama 客戶端（舊版相容）
+│   │   ├── llm_client.py        # 統一 LLM 客戶端（Ollama/OpenAI/FastAPI）
+│   │   ├── asr_client.py        # ASR 橋接（subprocess / 遠端 API）
+│   │   └── exceptions.py        # 自訂例外
 │   ├── audio/
 │   │   ├── __init__.py
-│   │   ├── player.py
-│   │   └── exporter.py
+│   │   ├── player.py            # QMediaPlayer 封裝
+│   │   └── exporter.py          # WAV/MP3 匯出
 │   └── core/
 │       ├── __init__.py
-│       ├── config.py
-│       ├── history.py
-│       └── chinese_converter.py  ★ NEW
-├── requirements.txt
-├── config.example.yaml
+│       ├── config.py            # Dataclass 設定管理（YAML）
+│       ├── history.py           # 歷史記錄管理（YAML）
+│       └── chinese_converter.py # 簡繁轉換（opencc）
+├── scripts/
+│   ├── asr_worker.py            # ASR subprocess worker（venv-asr 下執行）
+│   ├── tts_server.py            # Qwen3-TTS FastAPI 伺服器（venv-tts 下執行）
+│   ├── llm_server.py            # 本地 LLM FastAPI 伺服器（venv-llm 下執行）
+│   └── download_models.py       # 模型下載腳本（互動式選單）
+├── models/                      # 本地模型目錄（git 忽略，由 download_models.bat 建立）
+│   ├── Qwen3-ASR-0.6B/          # 語音辨識模型（小）
+│   ├── Qwen3-ASR-1.7B/          # 語音辨識模型（大）
+│   ├── Qwen3-ForcedAligner-0.6B/ # 時間軸對齊模型
+│   ├── Qwen3-TTS-0.6B/          # 語音合成模型（小）
+│   ├── Qwen3-TTS-1.7B/          # 語音合成模型（大）
+│   ├── Qwen3-0.6B/              # LLM 潤稿翻譯（超小）
+│   ├── Qwen3-1.7B/              # LLM 潤稿翻譯（小型）
+│   └── Qwen3-4B/                # LLM 潤稿翻譯（中型）
+├── data/
+│   └── history.yaml             # 歷史記錄持久化
+├── venv/                        # 主 GUI 虛擬環境（git 忽略）
+├── venv-asr/                    # ASR 虛擬環境（git 忽略）
+├── venv-tts/                    # TTS 虛擬環境（git 忽略）
+├── venv-llm/                    # LLM 虛擬環境（git 忽略）
+├── requirements.txt             # 主 venv 依賴
+├── requirements-asr.txt         # venv-asr 依賴
+├── requirements-tts.txt         # venv-tts 依賴
+├── requirements-llm.txt         # venv-llm 依賴
+├── config.yaml                  # 執行期設定（git 忽略）
+├── config.example.yaml          # 設定範本
+├── start.bat / start.sh         # GUI 啟動腳本
+├── setup_asr.bat / setup_asr.sh # ASR 環境建立 + 安裝
+├── setup-tts.bat / setup-tts.sh # TTS 環境建立 + 啟動伺服器
+├── setup_llm.bat                # LLM 環境建立 + 啟動伺服器
+├── download_models.bat          # 模型下載（全部 / 分群組）
 ├── SPEC.md
 └── README.md
 ```
 
 ---
 
-## 6. 依賴套件（更新）
+## 7. 依賴套件
+
+### 主 venv（`requirements.txt`）
 
 | 套件 | 版本 | 用途 |
 |------|------|------|
@@ -246,62 +406,57 @@ Qwen3TTS-app/
 | pydantic | >=2.0.0 | 資料驗證 |
 | PyYAML | >=6.0 | 設定檔讀寫 |
 | requests | >=2.31.0 | HTTP 客戶端 |
-| soundfile | >=0.12.0 | 音訊檔案處理 |
-| numpy | >=1.24.0 | 音訊資料處理 |
-| opencc-python | >=0.1.0 | 簡繁轉換 ★ NEW |
+| soundfile | >=0.12.0 | 音訊處理 |
+| numpy | >=1.24.0 | 音訊資料 |
+| opencc | >=1.2.0 | 簡繁轉換 |
+
+### venv-asr（`requirements-asr.txt`）
+
+| 套件 | 用途 |
+|------|------|
+| torch / torchaudio | 推論 |
+| transformers | Qwen3-ASR 模型載入 |
+| huggingface_hub | 模型下載 |
+| yt-dlp | YouTube 音訊下載 |
+| ffmpeg-python | 音訊解碼 |
+
+### venv-tts（`requirements-tts.txt`）
+
+| 套件 | 用途 |
+|------|------|
+| qwen-tts | Qwen3-TTS 模型 |
+| fastapi / uvicorn | HTTP 伺服器 |
+| torch / torchaudio | 推論 |
+| soundfile | 音訊輸出 |
+
+### venv-llm（`requirements-llm.txt`）
+
+| 套件 | 用途 |
+|------|------|
+| transformers | Qwen3 LLM 載入與推論 |
+| accelerate | 多設備支援 |
+| fastapi / uvicorn | HTTP 伺服器 |
+| torch | 推論 |
+| sentencepiece / protobuf | Tokenizer |
 
 ---
 
-## 7. 實作進度
+## 8. 實作狀態
 
-| 階段 | 狀態 | 說明 |
+| 功能 | 狀態 | 說明 |
 |------|------|------|
-| 1. 專案結構建立 | ✅ | 目錄、__init__.py |
-| 2. Core 模組 | ✅ | Config, HistoryManager |
-| 3. API 客戶端 | ✅ | Qwen3Client |
-| 4. Audio 模組 | ✅ | AudioPlayer, AudioExporter |
-| 5. UI 層 | ⏳ | MainWindow, Tabs |
-| 6. Ollama 客戶端 | ⏳ | NEW - 待實作 |
-| 7. 簡繁轉換 | ⏳ | NEW - 待實作 |
-| 8. 潤稿翻譯分頁 | ⏳ | NEW - 待實作 |
-| 9. 歷史記錄分頁 | ⏳ | NEW - 待實作 |
-| 10. README | ⏳ | 待建立 |
-
----
-
-## 8. 待實作項目
-
-### 8.1 OllamaClient (`app/api/ollama_client.py`)
-```python
-class OllamaClient:
-    def __init__(self, base_url: str = "http://localhost:11434")
-    def generate(self, prompt: str, model: str) -> str
-    def polish(self, text: str, model: str) -> str
-    def translate(self, text: str, from_lang: str, to_lang: str, model: str) -> str
-    def health_check(self) -> bool
-```
-
-### 8.2 ChineseConverter (`app/core/chinese_converter.py`)
-```python
-class ChineseConverter:
-    def __init__(self, mode: str = "t2s")  # t2s=繁→簡, s2t=簡→繁
-    def convert(self, text: str) -> str
-    @staticmethod
-    def s2t(text: str) -> str: ...  # 簡→繁
-    @staticmethod
-    def t2s(text: str) -> str: ...  # 繁→簡
-```
-
-### 8.3 EditTab (`app/ui/edit_tab.py`)
-- 原文輸入框
-- 模式選擇（潤稿/翻譯/簡繁）
-- 目標語言選擇
-- 處理按鈕
-- 結果輸出框
-- 發送至合成按鈕
-
-### 8.4 HistoryTab (`app/ui/history_tab.py`)
-- 歷史記錄列表（QListWidget）
-- 篩選功能（依類型）
-- 詳情面板
-- 操作按鈕（重新執行/刪除/複製）
+| 文字合成分頁 | ✅ | 完整實作 |
+| 語音克隆分頁 | ✅ | 文字 + 音檔參考 |
+| 潤稿翻譯分頁 | ✅ | 7 種模式，多 LLM 提供商 |
+| 語音辨識分頁 | ✅ | 本地 venv-asr + 遠端 API |
+| 歷史記錄分頁 | ✅ | 完整實作 |
+| 設定分頁 | ✅ | TTS / LLM / ASR / UI 設定 |
+| 單一實例約束 | ✅ | QSharedMemory |
+| ASR 設定集中到 Settings | ✅ | 可在設定儲存並即時同步 |
+| TTS 本地伺服器 | ✅ | `scripts/tts_server.py` |
+| ASR subprocess worker | ✅ | `scripts/asr_worker.py` |
+| LLM 本地伺服器 | ✅ | `scripts/llm_server.py`（venv-llm） |
+| 模型下載腳本 | ✅ | `download_models.bat` / `scripts/download_models.py` |
+| 本地模型路徑解析 | ✅ | `models/` 優先，fallback HF cache |
+| 深色主題 | ✅ | 全局 QSS dark theme |
+| 狀態列連線指示燈 | ✅ | Qwen3 / LLM 連線狀態 |

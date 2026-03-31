@@ -9,7 +9,8 @@ _PROJECT_ROOT = Path(__file__).parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QMessageBox
+from PySide6.QtCore import QSharedMemory
 
 from app.core.config import Config
 from app.api.qwen3_client import Qwen3Client
@@ -25,6 +26,18 @@ def main():
     app = QApplication(sys.argv)
     app.setApplicationName("Qwen3-TTS")
     app.setOrganizationName("Qwen3TTS")
+
+    # ── Single-instance enforcement ──────────────────────────────────────────
+    # QSharedMemory is released automatically when the process exits (Windows)
+    # or when the QSharedMemory object is destroyed.
+    _instance_lock = QSharedMemory("Qwen3TTS-App-Instance-v1")
+    if not _instance_lock.create(1):
+        QMessageBox.warning(
+            None,
+            "已在執行中",
+            "Qwen3-TTS 應用程式已在執行中。\n請切換到已開啟的視窗。",
+        )
+        sys.exit(0)
 
     # Apply global dark theme + font (must be done before any widgets are shown)
     apply_theme(app)

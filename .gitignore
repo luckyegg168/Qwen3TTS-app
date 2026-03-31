@@ -12,9 +12,14 @@ dist/
 
 # Virtual environment
 venv/
+venv-asr/
+venv-tts/
 .venv/
 env/
 .env
+
+# Downloaded models (large files; download with download_models.bat)
+models/
 
 # Config with secrets (use config.example.yaml as template)
 config.yaml

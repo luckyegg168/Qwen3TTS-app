@@ -35,7 +35,22 @@ import shutil
 import sys
 import tempfile
 import traceback
+from pathlib import Path
 from typing import Any
+
+# ─── Local model resolution ───────────────────────────────────────────────────
+
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+_MODELS_DIR   = _PROJECT_ROOT / "models"
+
+
+def _resolve(repo_id: str) -> str:
+    """Return local models/ path if the model was downloaded there, else repo_id."""
+    name = repo_id.split("/")[-1]          # "Qwen3-ASR-0.6B"
+    local = _MODELS_DIR / name
+    if (local / "config.json").exists():
+        return str(local)
+    return repo_id
 
 
 # ─── Progress helpers ─────────────────────────────────────────────────────────
@@ -218,14 +233,14 @@ def run_asr(
     }
 
     if timestamps:
-        load_kwargs["forced_aligner"] = "Qwen/Qwen3-ForcedAligner-0.6B"
+        load_kwargs["forced_aligner"] = _resolve("Qwen/Qwen3-ForcedAligner-0.6B")
         load_kwargs["forced_aligner_kwargs"] = {
             "dtype": dtype,
             "device_map": device,
         }
 
     _progress("loading_model")
-    model = Qwen3ASRModel.from_pretrained(model_id, **load_kwargs)
+    model = Qwen3ASRModel.from_pretrained(_resolve(model_id), **load_kwargs)
 
     lang_arg = None if language == "auto" else language
 
